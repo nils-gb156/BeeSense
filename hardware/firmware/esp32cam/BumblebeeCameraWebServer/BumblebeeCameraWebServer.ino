@@ -20,8 +20,8 @@ SPIClass sdspi = SPIClass();
 
 int pictureNumber = 0;
 
-const char *ssid = "FRITZ!Box 7560 LC GB";
-const char *password = "48991416100471872244";
+const char *ssid = "-";
+const char *password = "-";
 
 void startCameraServer();
 
