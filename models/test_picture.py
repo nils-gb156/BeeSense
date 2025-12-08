@@ -3,15 +3,19 @@ from ultralytics import YOLO
 # Modell laden
 model = YOLO("runs/detect/train/weights/best.pt")
 
-# Inferenz auf einem Testbild
+# Inferenz auf allen Testbildern im Ordner
 results = model.predict(
-    source="../data/images/test/20251202165240_jpg.rf.3de78bfa6beba2fc22728c0d5225cfe3.jpg",  # Pfad zum Testbild
-    conf=0.1,   # Confidence Threshold, z.B. 0.3
-    save=True,  # speichert Bild mit Bounding Boxes
-    show=True   # öffnet das Bild im Fenster
+    source="../data/images/test/",  # Pfad zum Test-Ordner
+    conf=0.3,   # Confidence Threshold, z.B. 0.3
+    save=True,  # speichert Bilder mit Bounding Boxes
+    show=False  # kein Fenster öffnen
 )
 
 # Ergebnisse ausgeben
-for r in results:
-    print("Gefundene Hummeln:", len(r.boxes))
-    print("Koordinaten:", r.boxes.xyxy)  # xmin, ymin, xmax, ymax
+print(f"\nInsgesamt {len(results)} Bilder getestet:\n")
+for i, r in enumerate(results):
+    print(f"Bild {i+1}: {len(r.boxes)} Hummeln gefunden")
+    if len(r.boxes) > 0:
+        print(f"  Konfidenz: {r.boxes.conf.tolist()}")
+        
+print(f"\nGespeichert in: runs/detect/predict/")
