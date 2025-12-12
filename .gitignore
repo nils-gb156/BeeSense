@@ -29,6 +29,7 @@ wheels/
 # YOLOv8 / Ultralytics
 models/runs/
 models/*.pt
+models/calib_data/
 *.pt
 *.onnx
 *.engine
