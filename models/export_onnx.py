@@ -56,7 +56,7 @@ class DetectESPDL(Detect):
 def export_yolov8_to_onnx(
     model_path: str,
     output_path: str = None,
-    img_size: tuple = (640, 480),
+    img_size: tuple = (96, 96),
     opset_version: int = 11,
     simplify: bool = True
 ):
@@ -129,8 +129,8 @@ if __name__ == "__main__":
         '--img-size',
         nargs=2,
         type=int,
-        default=[640, 480],
-        help='Input image size as width height (default: 640 480)'
+        default=[96, 96],
+        help='Input image size als Breite Höhe (Standard: 96 96)'
     )
     parser.add_argument(
         '--opset',

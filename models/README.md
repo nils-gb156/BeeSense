@@ -48,16 +48,16 @@ Wenn du ein neues Modell trainiert hast (`best.pt`), führe folgende Schritte au
 cd models
 
 # 1. Exportiere zu ONNX (QVGA für beste Performance)
-python export_onnx.py --model runs/detect/train/weights/best.pt --output runs/detect/train/weights/best.onnx --img-size 320 256
+python export_onnx.py --model runs/detect/train/weights/best.pt --output runs/detect/train/weights/best.onnx --img-size 96 96
 
 # 2. Erstelle Kalibrierungsdaten (100 Samples)
-python prepare_calib_data.py --data-dir ../data --output-dir ./calib_data --img-size 320 256 --num-samples 100
+python prepare_calib_data.py --data-dir ../data --output-dir ./calib_data --img-size 96 96 --num-samples 100
 
 # 3. Quantisiere für ESP32-S3
-python quantize_yolov8.py --onnx runs/detect/train/weights/best.onnx --calib-dir ./calib_data --output-dir ./quantized_model_qvga --target esp32s3
+py quantize_yolov8.py --onnx runs/detect/train/weights/best.onnx --calib-dir ./calib_data --output-dir ./quantized_model --target esp32s3
 
 # 4. Kopiere quantisiertes Modell ins ESP32-Projekt
-Copy-Item quantized_model_qvga/yolov8_bumblebee_quantized.espdl ` -Destination ../hardware/firmware/esp32cam/BumblebeeDetection/main/models/
+Copy-Item quantized_model/yolov8_bumblebee_quantized.espdl ` -Destination ../hardware/firmware/esp32cam/BumblebeeDetection/main/models/
 
 # 5. Räume temporäre Dateien auf
 Remove-Item -Recurse -Force calib_data
