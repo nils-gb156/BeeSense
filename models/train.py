@@ -1,11 +1,11 @@
 from ultralytics import YOLO
 
 # Modell laden
-model = YOLO('yolov8n.pt')
+model = YOLO('yolo11n.pt')
 
 # Training starten
 model.train(
-    data='yolov8_bumblebee.yaml',
+    data='yolov11_bumblebee.yaml',
     imgsz=[96, 96],
     epochs=50,
     batch=16,
