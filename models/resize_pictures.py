@@ -4,8 +4,8 @@ from PIL import Image
 
 # Passe die Pfade ggf. an
 base_dir = "../data/images"
-subdirs = ["train", "val", "test"]
-target_size = 320
+subdirs = ["test"]
+target_size = 96
 
 for sub in subdirs:
     folder = os.path.join(base_dir, sub)
@@ -15,10 +15,8 @@ for sub in subdirs:
         try:
             with Image.open(img_path) as img:
                 img = img.convert("RGB")
-                w_percent = 320 / float(img.width)
-                h_size = int(float(img.height) * w_percent)
-                img = img.resize((320, h_size), Image.Resampling.LANCZOS)
+                img = img.resize((target_size, target_size), Image.Resampling.LANCZOS)
                 img.save(img_path)
-                print(f"Resized: {img_path}")
+                print(f"Resized to {target_size}x{target_size}: {img_path}")
         except Exception as e:
             print(f"Error with {img_path}: {e}")
