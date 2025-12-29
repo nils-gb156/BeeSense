@@ -56,7 +56,7 @@ def quant_yolo11n(imgsz):
     )
     ESPDL_MODLE_PATH = os.path.join(
         script_dir,
-        "quantized_model/bumblebee_detect_yolo11n.espdl",
+        "quantized_model/espdet_pico_96_96_bumblebee.espdl",
     )
 
 
