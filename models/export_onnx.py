@@ -1,155 +1,147 @@
-import torch.nn as nn
-
-# Hilfsfunktion: Ersetze Swish/SiLU durch SiLU (oder ReLU, falls gewünscht)
-def replace_swish_with_silu(model):
-    for name, module in model.named_modules():
-        # Ersetze als Submodul (nur SiLU, Swish gibt es in torch nicht)
-        if isinstance(module, nn.SiLU):
-            parent = model
-            *path, last = name.split('.')
-            for p in path:
-                parent = getattr(parent, p)
-            setattr(parent, last, nn.SiLU())  # oder nn.ReLU()
-        # Ersetze als Attribut
-        if hasattr(module, 'act') and module.act is not None:
-            if module.act.__class__.__name__.lower() in ['silu', 'swish']:
-                module.act = nn.SiLU()  # oder nn.ReLU()
-    return model
-"""
-Export YOLOv8 model to ONNX format compatible with ESP-DL
-Based on Espressif's ESP-DL YOLO11n deployment guide
-"""
-
-import torch
 from ultralytics import YOLO
-from ultralytics.nn.modules import Detect
-import argparse
+from ultralytics.nn.modules import Detect, Attention
+from ultralytics.engine.exporter import Exporter, try_export, arange_patch
+from ultralytics.utils import LOGGER, __version__, colorstr
+from ultralytics.utils.checks import check_requirements
+ # get_latest_opset removed in latest ultralytics; use fixed opset
+import torch
+import onnx
 
 
-class DetectESPDL(Detect):
-    """
-    Custom Detect head for ESP-DL deployment.
-    Separates box and class score outputs instead of concatenating them.
-    This reduces quantization errors and improves inference speed.
-    """
+class ESP_Detect(Detect):
     def forward(self, x):
-        boxes = []
-        scores = []
-        
-        for i, layer in enumerate(x):
-            # Get predictions from each detection head
-            pred = self.cv2[i](layer)  # Box predictions
-            score = self.cv3[i](layer)  # Class predictions
-            
-            # Reshape and store
-            b, _, h, w = pred.shape
-            boxes.append(pred.view(b, self.reg_max * 4, -1))
-            scores.append(score.view(b, self.nc, -1))
-        
-        # Concatenate along spatial dimension
-        boxes = torch.cat(boxes, dim=2)
-        scores = torch.cat(scores, dim=2)
-        
-        return boxes, scores
+        """Returns predicted bounding boxes and class probabilities respectively."""
+        # self.nl = 3
+        box0 = self.cv2[0](x[0])
+        score0 = self.cv3[0](x[0])
+
+        box1 = self.cv2[1](x[1])
+        score1 = self.cv3[1](x[1])
+
+        box2 = self.cv2[2](x[2])
+        score2 = self.cv3[2](x[2])
+
+        return box0, score0, box1, score1, box2, score2
 
 
-def export_yolov8_to_onnx(
-    model_path: str,
-    output_path: str = None,
-    img_size: tuple = (96, 96),
-    opset_version: int = 11,
-    simplify: bool = True
-):
+class ESP_Attention(Attention):
+    def forward(self, x):
+        """
+        Forward pass of the Attention module.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            (torch.Tensor): The output tensor after self-attention.
+        """
+        B, C, H, W = x.shape
+        N = H * W
+        qkv = self.qkv(x)
+        q, k, v = qkv.view(
+            -1, self.num_heads, self.key_dim * 2 + self.head_dim, N
+        ).split([self.key_dim, self.key_dim, self.head_dim], dim=2)
+        attn = (q.transpose(-2, -1) @ k) * self.scale
+        attn = attn.softmax(dim=-1)
+        x = (v @ attn.transpose(-2, -1)).view(-1, C, H, W) + self.pe(
+            v.reshape(-1, C, H, W)
+        )
+        x = self.proj(x)
+        return x
+
+
+class ESP_Detect_Exporter(Exporter):
     """
-    Export YOLOv8 model to ONNX format compatible with ESP-DL
-    
-    Args:
-        model_path: Path to YOLOv8 .pt model file
-        output_path: Path for output ONNX file (default: same as model_path with .onnx extension)
-        img_size: Input image size as (width, height)
-        opset_version: ONNX opset version
-        simplify: Whether to simplify the ONNX model
+    adapted from ultralytics for detection task
     """
-    print(f"Loading YOLOv8 model from: {model_path}")
-    model = YOLO(model_path)
 
-    # Ersetze Swish/SiLU durch SiLU (oder ReLU)
-    print("Ersetze Swish/SiLU durch SiLU für ESP-DL Kompatibilität...")
-    model.model = replace_swish_with_silu(model.model)
+    @try_export
+    def export_onnx(self, prefix=colorstr("ONNX:")):
+        """YOLO ONNX export."""
+        requirements = ["onnx>=1.14.0"]  # from esp-ppq requirements.txt
+        # since onnxslim will cause NCHW -> 1(N*C)HW in yolo11, we replace onnxslim with onnxsim
+        if self.args.simplify:
+            requirements += [
+                "onnxsim",
+                "onnxruntime" + ("-gpu" if torch.cuda.is_available() else ""),
+            ]
+        check_requirements(requirements)
 
-    # Replace the Detect head with ESP-DL compatible version
-    print("Replacing Detect head with ESP-DL compatible version...")
-    for module in model.model.modules():
-        if isinstance(module, Detect):
-            module.__class__ = DetectESPDL
-            print(f"✓ Replaced Detect head - Channels: {module.nc}, Reg_max: {module.reg_max}")
-    
-    # Set output path
-    if output_path is None:
-        output_path = model_path.replace('.pt', '.onnx')
-    
-    print(f"\nExporting to ONNX format...")
-    print(f"  Image size: {img_size}")
-    print(f"  Opset version: {opset_version}")
-    print(f"  Output path: {output_path}")
-    
-    # Export model
-    model.export(
-        format='onnx',
-        imgsz=img_size,
-        opset=opset_version,
-        simplify=simplify,
-        dynamic=False,  # ESP-DL requires static shapes
-    )
-    
-    print(f"\n✓ Successfully exported ONNX model to: {output_path}")
-    print("\nNext steps:")
-    print("1. Prepare calibration dataset with prepare_calib_data.py")
-    print("2. Quantize the model with quantize_yolov8.py")
-    print("3. Deploy to ESP32-S3 using ESP-DL")
-    
-    return output_path
+        opset_version = self.args.opset or 18  # Use ONNX opset 18 for compatibility with current exporter
+        LOGGER.info(
+            f"\n{prefix} starting export with onnx {onnx.__version__} opset {opset_version}..."
+        )
+        f = str(self.file.with_suffix(".onnx"))
+        output_names = ["box0", "score0", "box1", "score1", "box2", "score2"]
+        dynamic = (
+            self.args.dynamic
+        )  # case 1: deploy model on ESP32, dynamic=False; case 2: QAT gt onnx for inference, dynamic=True
+        if dynamic:
+            dynamic = {"images": {0: "batch"}}
+            for name in output_names:
+                dynamic[name] = {0: "batch"}
+
+        with arange_patch(self.args):
+            torch.onnx.export(
+                self.model,
+                self.im,
+                f,
+                verbose=False,
+                opset_version=opset_version,
+                do_constant_folding=False,
+                input_names=["images"],
+                output_names=output_names,
+                dynamic_axes=dynamic or None,
+            )
+        # Checks
+        model_onnx = onnx.load(f)  # load onnx model
+
+        # Simplify
+        if self.args.simplify:
+            try:
+                import onnxsim
+
+                LOGGER.info(
+                    f"{prefix} simplifying with onnxsim {onnxsim.__version__}..."
+                )
+                model_onnx, _ = onnxsim.simplify(model_onnx)
+
+            except Exception as e:
+                LOGGER.warning(f"{prefix} simplifier failure: {e}")
+
+        # Metadata
+        for k, v in self.metadata.items():
+            meta = model_onnx.metadata_props.add()
+            meta.key, meta.value = k, str(v)
+
+        onnx.save(model_onnx, f)
+        return f, model_onnx
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Export YOLOv8 to ONNX for ESP-DL')
-    parser.add_argument(
-        '--model',
-        type=str,
-        default='yolov8n.pt',
-        help='Path to YOLOv8 .pt model file'
-    )
-    parser.add_argument(
-        '--output',
-        type=str,
-        default=None,
-        help='Output ONNX file path (default: same as model with .onnx extension)'
-    )
-    parser.add_argument(
-        '--img-size',
-        nargs=2,
-        type=int,
-        default=[96, 96],
-        help='Input image size als Breite Höhe (Standard: 96 96)'
-    )
-    parser.add_argument(
-        '--opset',
-        type=int,
-        default=11,
-        help='ONNX opset version (default: 11)'
-    )
-    parser.add_argument(
-        '--no-simplify',
-        action='store_true',
-        help='Do not simplify ONNX model'
-    )
-    
-    args = parser.parse_args()
-    
-    export_yolov8_to_onnx(
-        model_path=args.model,
-        output_path=args.output,
-        img_size=tuple(args.img_size),
-        opset_version=args.opset,
-        simplify=not args.no_simplify
-    )
+class ESP_YOLO(YOLO):
+    def export(
+        self,
+        **kwargs,
+    ):
+        self._check_is_pytorch_model()
+        custom = {
+            "imgsz": self.model.args["imgsz"],
+            "batch": 1,
+            "data": None,
+            "device": None,
+            "verbose": False,
+        }
+        args = {**self.overrides, **custom, **kwargs, "mode": "export"}
+        return ESP_Detect_Exporter(overrides=args, _callbacks=self.callbacks)(
+            model=self.model
+        )
+
+
+model = ESP_YOLO("runs/detect/train/weights/best.pt")
+for m in model.modules():
+    if isinstance(m, Attention):
+        m.forward = ESP_Attention.forward.__get__(m)
+    if isinstance(m, Detect):
+        m.forward = ESP_Detect.forward.__get__(m)
+
+model.export(format="onnx", simplify=True, opset=18, dynamic=False, imgsz=96)
