@@ -14,7 +14,7 @@ Nach dem Training findest du die Gewichte in: `models/runs/detect/train/weights/
 
 ## 2. Testen
 
-Du kannst Bilder aus `data/images/test` mit `models/test_picture.py` prüfen:
+Du kannst Bilder aus `data/images/test` mit `models/predict_pictures.py` prüfen:
 
 - Annotierte Bilder werden in `models/runs/detect/predict/` gespeichert.
 - `conf` = Confidence Threshold, kann angepasst werden (z.B. 0.2–0.5).
@@ -29,13 +29,13 @@ Wenn du ein neues Modell trainiert hast (`best.pt`), führe folgende Schritte au
 ```bash
 cd models
 
-# 1. Exportiere zu ONNX (96x96)
+# 1. Exportiere zu ONNX
 python export_onnx.py
 
-# 2. Erstelle Kalibrierungsdaten (100 Samples, 96x96)
+# 2. Erstelle Kalibrierungsdaten
 python prepare_calib_data.py
 
-# 3. Quantisiere für ESP32-S3 (96x06)
+# 3. Quantisiere für ESP32-S3
 python quantize_onnx_model.py
 ```
 

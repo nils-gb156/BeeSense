@@ -14,5 +14,5 @@ for img in sample_imgs:
     dst_path = os.path.join(dst_folder, img)
     with Image.open(src_path) as im:
         im = im.convert("RGB")
-        im = im.resize((96, 96), Image.LANCZOS)
+        im = im.resize((224, 224), Image.LANCZOS)
         im.save(dst_path)
