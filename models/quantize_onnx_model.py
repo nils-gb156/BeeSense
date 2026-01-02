@@ -1,6 +1,6 @@
 import os
 from esp_ppq import QuantizationSettingFactory
-from esp_ppq.api import espdl_quantize_onnx, get_target_platform
+from esp_ppq.api import espdl_quantize_onnx
 from torch.utils.data import DataLoader
 import torch
 from torch.utils.data import Dataset
@@ -8,17 +8,16 @@ from torchvision import transforms
 from PIL import Image
 from onnxsim import simplify
 import onnx
-import zipfile
-import urllib.request
 
 
 class CaliDataset(Dataset):
-    def __init__(self, path, img_shape=96):
+    def __init__(self, path, img_shape=224):
         super().__init__()
+        height, width = img_shape if isinstance(img_shape, (list, tuple)) else (img_shape, img_shape)
         self.transform = transforms.Compose(
             [
                 transforms.ToTensor(),
-                transforms.Resize((img_shape, img_shape)),
+                transforms.Resize((height, width)),
                 transforms.Normalize(mean=[0, 0, 0], std=[1, 1, 1]),
             ]
         )
@@ -26,6 +25,8 @@ class CaliDataset(Dataset):
         self.imgs_path = []
         self.path = path
         for img_name in os.listdir(self.path):
+            if not img_name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
+                continue
             img_path = os.path.join(self.path, img_name)
             self.imgs_path.append(img_path)
 
@@ -44,85 +45,63 @@ def report_hook(blocknum, blocksize, total):
     print(f"\rDownloading calibration dataset: {percent:.2f}%", end="")
 
 
-def quant_yolo11n(imgsz):
-    BATCH_SIZE = 32
-    INPUT_SHAPE = [3, imgsz, imgsz]
-    DEVICE = "cpu"
-    TARGET = "esp32s3"
-    NUM_OF_BITS = 8
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    ONNX_PATH = os.path.join(
-        script_dir, "runs/detect/train/weights/best.onnx"
-    )
-    ESPDL_MODLE_PATH = os.path.join(
-        script_dir,
-        "quantized_model/espdet_pico_96_96_bumblebee.espdl",
-    )
-
-
-    CALIB_DIR = "calib_data"  # Eigene Kalibrierungsbilder verwenden
-
-    model = onnx.load(ONNX_PATH)
+def quant_espdet(onnx_path, target, num_of_bits, device, batchsz, imgsz, calib_dir, espdl_model_path):
+    INPUT_SHAPE = [3, *imgsz] if isinstance(imgsz, (list, tuple)) else [3, imgsz, imgsz]
+    model = onnx.load(onnx_path)
     sim = True
     if sim:
         model, check = simplify(model)
         assert check, "Simplified ONNX model could not be validated"
-    onnx.save(onnx.shape_inference.infer_shapes(model), ONNX_PATH)
+    onnx.save(onnx.shape_inference.infer_shapes(model), onnx_path)
 
-    calibration_dataset = CaliDataset(CALIB_DIR, img_shape=imgsz)
+    calibration_dataset = CaliDataset(calib_dir, img_shape=imgsz)
+    # Batchgröße auf 1 setzen, um Reshape-Fehler zu vermeiden
     dataloader = DataLoader(
-        dataset=calibration_dataset, batch_size=BATCH_SIZE, shuffle=False
+        dataset=calibration_dataset, batch_size=1, shuffle=False
     )
 
     def collate_fn(batch: torch.Tensor) -> torch.Tensor:
-        return batch.to(DEVICE)
+        return batch.to(device)
 
     # default setting
     quant_setting = QuantizationSettingFactory.espdl_setting()
 
-    """
-    # Mixed-Precision + Horizontal Layer Split Pass Quantization
+    # Equalization
+    quant_setting.equalization = True
+    quant_setting.equalization_setting.iterations = 4
+    quant_setting.equalization_setting.value_threshold = .4
+    quant_setting.equalization_setting.opt_level = 2
+    quant_setting.equalization_setting.interested_layers = None
 
-    quant_setting.dispatching_table.append(
-        operation='/model.2/cv2/conv/Conv',
-        platform=get_target_platform(TARGET, 16)
-    )
-    quant_setting.dispatching_table.append(
-        operation='/model.3/conv/Conv',
-        platform=get_target_platform(TARGET, 16)
-    )
-
-    quant_setting.dispatching_table.append(
-        operation='/model.4/cv2/conv/Conv',
-        platform=get_target_platform(TARGET, 16)
-    )
-
-    quant_setting.weight_split = True
-    quant_setting.weight_split_setting.method = 'balance'
-    quant_setting.weight_split_setting.value_threshold = 1.5 #1.5
-    quant_setting.weight_split_setting.interested_layers = ['/model.0/conv/Conv',
-                                                            '/model.1/conv/Conv' ]
-    """
 
     quant_ppq_graph = espdl_quantize_onnx(
-        onnx_import_file=ONNX_PATH,
-        espdl_export_file=ESPDL_MODLE_PATH,
+        onnx_import_file=onnx_path,
+        espdl_export_file=espdl_model_path,
         calib_dataloader=dataloader,
         calib_steps=32,
         input_shape=[1] + INPUT_SHAPE,
-        target=TARGET,
-        num_of_bits=NUM_OF_BITS,
+        target=target,
+        num_of_bits=num_of_bits,
         collate_fn=collate_fn,
         setting=quant_setting,
-        device=DEVICE,
+        device=device,
         error_report=True,
         skip_export=False,
         export_test_values=False,
         verbose=0,
         inputs=None,
     )
-    return quant_ppq_graph
+    return quant_ppq_graph  # , selected
 
 
 if __name__ == "__main__":
-    quant_yolo11n(imgsz=96)
+    quant_espdet(
+        onnx_path="runs/detect/train_224_224/weights/best.onnx",
+        target="esp32s3",
+        num_of_bits=8,
+        device='cpu',
+        batchsz=1,  # Batchgröße auf 1 setzen
+        imgsz=224,
+        calib_dir="calib_data",
+        espdl_model_path="quantized_model/espdet_pico_224_224_bumblebee.espdl",
+    )
