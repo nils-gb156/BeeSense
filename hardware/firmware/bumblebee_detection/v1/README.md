@@ -38,7 +38,7 @@ If model location is set to FLASH partition, please set this option to `partitio
 
 ## Deploy
 
-cd C:\Users\nilsg\repos\BeeSense\hardware\firmware\bumblebee_detection_v1
+cd C:\Users\nilsg\repos\BeeSense\hardware\firmware\bumblebee_detection\v1
 
 idf.py set-target esp32s3
 

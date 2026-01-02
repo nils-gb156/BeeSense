@@ -11,6 +11,7 @@ bool create_dir(const char *full_path);
 
 int count_files(const char *full_path);
 
+bool save_detected_jpeg(const dl::image::img_t &img, const dl::cls::result_t &best, const char *dir_full_path);
 bool save_classified_jpeg(const dl::image::img_t &img, const dl::cls::result_t &best, const char *dir_full_path);
 
 } // namespace sdcard

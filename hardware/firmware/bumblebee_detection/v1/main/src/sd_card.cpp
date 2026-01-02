@@ -7,10 +7,13 @@
 #include "driver/sdspi_host.h"
 #include "driver/gpio.h"
 
+
 #include <sys/stat.h>
+#include <time.h>
 #include <dirent.h>
 #include <cstring>
 #include <cstdio>
+#include "ff.h" // Für FATFS Zeitstempel
 
 #include "esp_jpeg_enc.h"
 #include "dl_image_jpeg.hpp"
@@ -54,7 +57,9 @@ static bool mount_sdcard_spi() {
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
         .max_files = 5,
-        .allocation_unit_size = 16 * 1024
+        .allocation_unit_size = 16 * 1024,
+        .disk_status_check_enable = false,
+        .use_one_fat = false
     };
 
     ESP_LOGI(TAG, "Initializing SD card over SPI");
@@ -287,15 +292,24 @@ bool save_detected_jpeg(const dl::image::img_t &img,
         return false;
     }
 
-    // Änderungsdatum setzen (aktuelles Systemdatum/Zeit)
-    struct stat st;
-    if (stat(filepath, &st) == 0) {
-        struct utimbuf new_times;
-        new_times.actime = st.st_atime; // Zugriffszeit unverändert
-        new_times.modtime = time(NULL); // Änderungszeit auf jetzt setzen
-        utime(filepath, &new_times);
+    // Änderungsdatum setzen (aktuelles Systemdatum/Zeit) via FATFS
+    // Nur möglich, wenn FF_USE_CHMOD und FF_FS_NORTC == 0 in FATFS Konfiguration
+    struct tm *tm_now;
+    time_t t = time(NULL);
+    tm_now = localtime(&t);
+    if (tm_now) {
+        FILINFO finfo = {0};
+        finfo.fdate = ((tm_now->tm_year - 80) << 9) | ((tm_now->tm_mon + 1) << 5) | tm_now->tm_mday;
+        finfo.ftime = (tm_now->tm_hour << 11) | (tm_now->tm_min << 5) | (tm_now->tm_sec / 2);
+#ifdef f_utime
+        if (f_utime(filepath, &finfo) != 0) {
+            ESP_LOGW(TAG, "Could not set FATFS file time: %s", filepath);
+        }
+#else
+        ESP_LOGW(TAG, "f_utime nicht verfügbar, Änderungsdatum kann nicht gesetzt werden: %s", filepath);
+#endif
     } else {
-        ESP_LOGW(TAG, "Could not stat file to set modification time: %s", filepath);
+        ESP_LOGW(TAG, "Could not get localtime for file time: %s", filepath);
     }
 
     ESP_LOGI(TAG, "Saved successfully");
