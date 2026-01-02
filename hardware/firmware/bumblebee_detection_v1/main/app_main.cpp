@@ -197,7 +197,7 @@ extern "C" void app_main(void)
         }
         // Bild mit BBoxen speichern
         dl::cls::result_t dummy_result = {};
-        sdcard::save_classified_jpeg(cropped_img, dummy_result, "/sdcard/bumblebee_detect");
+        sdcard::save_detected_jpeg(cropped_img, dummy_result, "/sdcard/bumblebee_detect");
         delete detect;
         heap_caps_free(cropped_img.data);
 

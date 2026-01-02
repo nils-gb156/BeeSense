@@ -226,19 +226,19 @@ int count_files(const char *path) {
     return count;
 }
 
-bool save_classified_jpeg(const dl::image::img_t &img,
+bool save_detected_jpeg(const dl::image::img_t &img,
                           const dl::cls::result_t &best,
                           const char *dir_full_path) {
     if (!g_mounted) {
-        ESP_LOGE(TAG, "save_classified_jpeg: SD not mounted");
+        ESP_LOGE(TAG, "save_detected_jpeg: SD not mounted");
         return false;
     }
     if (!img.data) {
-        ESP_LOGE(TAG, "save_classified_jpeg: image has no data");
+        ESP_LOGE(TAG, "save_detected_jpeg: image has no data");
         return false;
     }
     if (img.pix_type != dl::image::DL_IMAGE_PIX_TYPE_RGB888) {
-        ESP_LOGE(TAG, "save_classified_jpeg: image is not RGB888");
+        ESP_LOGE(TAG, "save_detected_jpeg: image is not RGB888");
         return false;
     }
 
@@ -278,13 +278,24 @@ bool save_classified_jpeg(const dl::image::img_t &img,
     char filepath[256];
     std::snprintf(filepath, sizeof(filepath), "%s/bumblebee_%04d.jpg", dir_full_path, idx + 1);
 
-    ESP_LOGI(TAG, "Saving classified JPEG: %s", filepath);
+    ESP_LOGI(TAG, "Saving detected JPEG: %s", filepath);
 
     esp_err_t write_err = dl::image::write_jpeg(jpeg_img, filepath);
     if (write_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save JPEG: %s", filepath);
         free(jpeg_img.data);
         return false;
+    }
+
+    // Änderungsdatum setzen (aktuelles Systemdatum/Zeit)
+    struct stat st;
+    if (stat(filepath, &st) == 0) {
+        struct utimbuf new_times;
+        new_times.actime = st.st_atime; // Zugriffszeit unverändert
+        new_times.modtime = time(NULL); // Änderungszeit auf jetzt setzen
+        utime(filepath, &new_times);
+    } else {
+        ESP_LOGW(TAG, "Could not stat file to set modification time: %s", filepath);
     }
 
     ESP_LOGI(TAG, "Saved successfully");
